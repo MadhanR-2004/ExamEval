@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { HiOutlineArrowUpTray, HiOutlineArrowPath } from 'react-icons/hi2';
+import { HiOutlineArrowUpTray, HiOutlineArrowPath, HiOutlineTrash } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
-import { getExam, getExamResults, triggerEvaluation } from '../services/api';
+import { getExam, getExamResults, triggerEvaluation, deletePaper } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import StatusBadge from '../components/StatusBadge';
 import ScoreBadge from '../components/ScoreBadge';
@@ -40,6 +40,17 @@ export default function ExamDetail() {
       setTimeout(loadData, 2000);
     } catch (err) {
       toast.error('Failed to trigger evaluation: ' + (err.response?.data?.detail || err.message));
+    }
+  };
+
+  const handleDeletePaper = async (paperId, studentName) => {
+    if (!confirm(`Delete paper for "${studentName}"? This will remove all evaluations and uploaded images.`)) return;
+    try {
+      await deletePaper(paperId);
+      toast.success('Paper deleted');
+      loadData();
+    } catch (err) {
+      toast.error('Failed to delete paper: ' + (err.response?.data?.detail || err.message));
     }
   };
 
@@ -158,6 +169,13 @@ export default function ExamDetail() {
                       >
                         Details
                       </Link>
+                      <button
+                        onClick={() => handleDeletePaper(paper.id, paper.student_name)}
+                        className="text-red-500 hover:text-red-700 text-xs font-medium"
+                        title="Delete paper"
+                      >
+                        <HiOutlineTrash className="w-4 h-4 inline" />
+                      </button>
                     </td>
                   </tr>
                 ))}

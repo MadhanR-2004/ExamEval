@@ -43,7 +43,7 @@ async def evaluate_answer(
     keywords: list[str] | None = None,
 ) -> dict:
     """
-    Use an LLM to evaluate a student's answer against the expected answer.
+    Use an LLM to evaluate a student's answer against the expected answer and based on your knowledge as well. check the whole content based on the questions
 
     Returns dict with: score, max_score, feedback
     """
@@ -138,15 +138,126 @@ async def evaluate_answer(
         }
 
 
+async def extract_answers_with_llm(
+    extracted_text: str,
+    questions: list[dict],
+) -> dict[int, str]:
+    """
+    Use an LLM to intelligently extract each student answer from the full OCR
+    text, based on the actual exam questions.
+
+    This replaces the fragile regex splitter.  The model is told exactly which
+    questions exist and asked to return only the relevant answer text for each.
+
+    Returns dict  {question_number: answer_text}
+    """
+    if not extracted_text or not questions:
+        return {}
+
+    question_list = "\n".join(
+        f"  Q{q['question_number']}: {q['question_text']}" for q in questions
+    )
+
+    # Build the prompt as a plain string (no f-string braces issues)
+    prompt = (
+        "You are an expert at reading handwritten exam answer sheets.\n\n"
+        "I will give you:\n"
+        "  1. The raw OCR text extracted from a student's answer sheet.\n"
+        "  2. The list of questions on the exam.\n\n"
+        "Your job: figure out which portion of the OCR text is the student's "
+        "answer to EACH question and return it.\n\n"
+        "CRITICAL RULES:\n"
+        "- Students may answer questions in ANY order (e.g. they might write "
+        "question 5 first, then question 2). Do NOT assume answers appear in "
+        "question order.\n"
+        "- A single answer may contain numbered sub-points, bullet lists, "
+        "definitions, or examples. These are PART of that one answer, NOT "
+        "separate question answers. For instance if the student writes "
+        "'1. Adjacent vertices  2. Cycle graph' inside an answer about graphs, "
+        "those are sub-points of ONE answer.\n"
+        "- Match answers to questions by MEANING and CONTEXT, not just by "
+        "numbers found in the text.\n"
+        "- If the student did not answer a question, return an empty string "
+        "for that question.\n"
+        "- Return ONLY the student's own answer text. Do NOT include the "
+        "question itself or any header/title text from the paper.\n"
+        "- Preserve the student's original wording.\n\n"
+        "--- OCR TEXT START ---\n"
+        f"{extracted_text}\n"
+        "--- OCR TEXT END ---\n\n"
+        "Questions on this exam:\n"
+        f"{question_list}\n\n"
+        "Respond ONLY with a valid JSON object. Keys are question numbers as "
+        "strings, values are the student's answer text. Example:\n"
+        '{"1": "answer text for question 1", "2": "answer text for question 2"}\n'
+    )
+
+    url = f"{settings.OLLAMA_BASE_URL}/api/generate"
+    payload = {
+        "model": settings.LLM_MODEL,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {
+            "temperature": 0.2,
+            "num_predict": 4096,
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(url, json=payload)
+            if response.status_code != 200:
+                logger.error(
+                    f"LLM answer-extraction error: status={response.status_code}"
+                )
+                return {}
+            result = response.json()
+
+        raw = result.get("response", "").strip()
+        logger.info(f"LLM answer-extraction response (first 300 chars): {raw[:300]}")
+
+        parsed = _parse_llm_json(raw)
+
+        # Normalise keys to int
+        answers: dict[int, str] = {}
+        for key, value in parsed.items():
+            try:
+                q_num = int(key)
+                answers[q_num] = str(value).strip()
+            except (ValueError, TypeError):
+                continue
+        return answers
+
+    except Exception as e:
+        logger.error(f"LLM answer-extraction failed: {e}")
+        return {}
+
+
 def _parse_llm_json(text: str) -> dict:
     """Attempt to parse JSON from LLM response, handling quirks."""
+    # Strip markdown code fences if present
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip())
+    cleaned = re.sub(r"\s*```$", "", cleaned).strip()
+
     # Try direct parse first
     try:
-        return json.loads(text)
+        return json.loads(cleaned)
     except json.JSONDecodeError:
         pass
 
-    # Try to find JSON object in response
+    # Try to find the outermost JSON object (handles nested braces)
+    # Find first '{' and last '}'
+    first_brace = cleaned.find("{")
+    last_brace = cleaned.rfind("}")
+    if first_brace != -1 and last_brace > first_brace:
+        candidate = cleaned[first_brace : last_brace + 1]
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            pass
+
+    # Fallback: try the simple non-nested regex (works for flat objects)
     json_match = re.search(r"\{[^{}]*\}", text, re.DOTALL)
     if json_match:
         try:
@@ -154,7 +265,7 @@ def _parse_llm_json(text: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # Extract score with regex fallback
+    # Last resort: extract score/feedback keys (for evaluation responses)
     score_match = re.search(r'"score"\s*:\s*([\d.]+)', text)
     feedback_match = re.search(r'"feedback"\s*:\s*"([^"]*)"', text)
 

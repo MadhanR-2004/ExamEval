@@ -9,7 +9,7 @@ from bson import ObjectId
 from app.database import get_db
 from app.models import PaperStatus
 from app.services.ocr_service import extract_text_from_images, parse_extracted_answers
-from app.services.llm_service import evaluate_answer
+from app.services.llm_service import evaluate_answer, extract_answers_with_llm
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,15 @@ async def process_paper(paper_id: str):
             {"$set": {"extracted_text": extracted_text, "status": PaperStatus.OCR_COMPLETED}},
         )
 
-        # ── Step 2: Parse answers ────────────────────────
-        student_answers = parse_extracted_answers(extracted_text)
+        # ── Step 2: Parse answers (LLM-based, regex fallback) ─
+        questions = exam.get("questions", [])
+        student_answers = await extract_answers_with_llm(extracted_text, questions)
+        if not student_answers:
+            logger.warning(
+                f"LLM extraction returned nothing for paper {paper_id}, "
+                "falling back to regex parser"
+            )
+            student_answers = parse_extracted_answers(extracted_text)
         logger.info(f"Parsed {len(student_answers)} answers from paper {paper_id}")
 
         # ── Step 3: Evaluate against exam questions ──────
@@ -67,7 +74,6 @@ async def process_paper(paper_id: str):
         # Delete any previous evaluations for re-processing
         await db.evaluations.delete_many({"paper_id": paper_id})
 
-        questions = exam.get("questions", [])
         total_score = 0
         max_score = 0
 
@@ -122,8 +128,9 @@ async def process_paper(paper_id: str):
         )
 
     except Exception as e:
-        logger.error(f"Evaluation pipeline failed for paper {paper_id}: {e}")
-        await _set_paper_failed(db, paper_id, str(e))
+        err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.error(f"Evaluation pipeline failed for paper {paper_id}: {err_msg}", exc_info=True)
+        await _set_paper_failed(db, paper_id, err_msg)
         raise
 
 
@@ -157,8 +164,16 @@ async def re_evaluate_paper(paper_id: str):
         # Delete old evaluations
         await db.evaluations.delete_many({"paper_id": paper_id})
 
-        student_answers = parse_extracted_answers(paper["extracted_text"])
         questions = exam.get("questions", [])
+        student_answers = await extract_answers_with_llm(
+            paper["extracted_text"], questions
+        )
+        if not student_answers:
+            logger.warning(
+                f"LLM extraction returned nothing for paper {paper_id}, "
+                "falling back to regex parser"
+            )
+            student_answers = parse_extracted_answers(paper["extracted_text"])
 
         total_score = 0
         max_score = 0
@@ -213,8 +228,9 @@ async def re_evaluate_paper(paper_id: str):
         )
 
     except Exception as e:
-        logger.error(f"Re-evaluation failed for paper {paper_id}: {e}")
-        await _set_paper_failed(db, paper_id, str(e))
+        err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+        logger.error(f"Re-evaluation failed for paper {paper_id}: {err_msg}", exc_info=True)
+        await _set_paper_failed(db, paper_id, err_msg)
         raise
 
 

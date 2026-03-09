@@ -145,8 +145,10 @@ async def run_evaluation_bg(paper_id: str):
     try:
         await process_paper(paper_id)
     except Exception as e:
+        err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
         logging.getLogger(__name__).error(
-            f"Background evaluation failed for paper {paper_id}: {e}"
+            f"Background evaluation failed for paper {paper_id}: {err_msg}",
+            exc_info=True,
         )
 
 

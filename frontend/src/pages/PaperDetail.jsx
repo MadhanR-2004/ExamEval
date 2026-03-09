@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { HiOutlineArrowPath, HiOutlineArrowLeft } from 'react-icons/hi2';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { HiOutlineArrowPath, HiOutlineArrowLeft, HiOutlineTrash } from 'react-icons/hi2';
 import toast from 'react-hot-toast';
-import { getPaperEvaluations, triggerEvaluation, triggerReEvaluation } from '../services/api';
+import { getPaperEvaluations, triggerEvaluation, triggerReEvaluation, deletePaper } from '../services/api';
 import LoadingSpinner from '../components/LoadingSpinner';
 import StatusBadge from '../components/StatusBadge';
 import ScoreBadge from '../components/ScoreBadge';
 
 export default function PaperDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [paper, setPaper] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -23,7 +24,7 @@ export default function PaperDetail() {
     const processing = ['ocr_processing', 'evaluating', 'uploaded'].includes(paper.status);
     if (!processing) return;
 
-    const interval = setInterval(loadPaper, 5000);
+    const interval = setInterval(loadPaper, 15000);
     return () => clearInterval(interval);
   }, [paper?.status]);
 
@@ -65,6 +66,17 @@ export default function PaperDetail() {
   const handleRefresh = () => {
     setRefreshing(true);
     loadPaper();
+  };
+
+  const handleDelete = async () => {
+    if (!confirm('Delete this paper? This will remove all evaluations and uploaded images.')) return;
+    try {
+      await deletePaper(id);
+      toast.success('Paper deleted');
+      navigate(paper?.exam ? `/exams/${paper.exam_id}` : '/exams');
+    } catch (err) {
+      toast.error('Failed to delete paper: ' + (err.response?.data?.detail || err.message));
+    }
   };
 
   if (loading) return <LoadingSpinner text="Loading paper details..." />;
@@ -109,6 +121,13 @@ export default function PaperDetail() {
               Re-Evaluate
             </button>
           ) : null}
+          <button
+            onClick={handleDelete}
+            className="btn-secondary text-sm text-red-600 border-red-300 hover:bg-red-50 flex items-center gap-1"
+          >
+            <HiOutlineTrash className="w-4 h-4" />
+            Delete
+          </button>
         </div>
       </div>
 
