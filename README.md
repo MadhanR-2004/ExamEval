@@ -40,7 +40,7 @@ An OCR + LLM based system for automatically evaluating handwritten exam papers. 
 | --------- | ---------------------------------- |
 | Frontend  | React 18 + Vite + TailwindCSS     |
 | Backend   | Python + FastAPI + SQLAlchemy      |
-| Database  | Mondodb                           |
+| Database  | Mongodb                           |
 | OCR       | Ollama Vision Model (minicpm-v)    |
 | LLM       | Ollama LLM (deepseek-r1:8b)       |
 | Charts    | Recharts                           |
@@ -121,7 +121,7 @@ OCR_MODEL=minicpm-v
 LLM_MODEL=deepseek-r1:8b
 
 # Database path
-DATABASE_URL=sqlite:///./exameval.db
+DATABASE_URL
 ```
 
 You can also change models at runtime via the Settings page in the UI.
