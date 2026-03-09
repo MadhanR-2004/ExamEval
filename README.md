@@ -40,7 +40,7 @@ An OCR + LLM based system for automatically evaluating handwritten exam papers. 
 | --------- | ---------------------------------- |
 | Frontend  | React 18 + Vite + TailwindCSS     |
 | Backend   | Python + FastAPI + SQLAlchemy      |
-| Database  | SQLite                             |
+| Database  | Mondodb                           |
 | OCR       | Ollama Vision Model (minicpm-v)    |
 | LLM       | Ollama LLM (deepseek-r1:8b)       |
 | Charts    | Recharts                           |
